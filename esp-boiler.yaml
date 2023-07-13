@@ -1,0 +1,231 @@
+esphome:
+  name: esp-boiler
+  friendly_name: esp-Boiler
+  platform: ESP8266
+  board: d1_mini
+  on_boot:
+    then:
+      - switch.turn_off: Man
+      - switch.turn_off: Plus
+      - switch.turn_off: Moins
+      - number.set:
+         id: Boiler_Regulation
+         value: 0
+    
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "pJj8VTlmswTUW/1txvUfslGuXYZubYWXibghGv2b+/c="
+
+ota:
+  password: "fa5547981ce308a9baae99835ce6b51f"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Esp-Boiler Fallback Hotspot"
+    password: "opnrdfRndr6V"
+
+web_server:
+  port: 80
+  local: true
+
+captive_portal:
+
+dallas:
+  - pin: D5
+
+interval:
+
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+              - lambda: 'return (isnan(id(Boiler_temperature).state));' 
+          then: 
+              - number.set:
+                 id: Boiler_Regulation
+                 value: 0
+
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+              - number.in_range:
+                 id: Boiler_Regulation
+                 above: 1
+                 below: 100
+              - lambda: 'return (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state);' 
+          then: 
+              - number.set:
+                 id: Boiler_Regulation
+                 value: 0
+
+
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+              - number.in_range:
+                 id: Boiler_Regulation
+                 above: 1
+                 below: 100
+              - lambda: 'return (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state);' 
+          then: 
+              - number.set:
+                 id: Boiler_Regulation
+                 value: 0
+
+  - interval: 1s
+    then:
+      - if:
+          condition:
+              - number.in_range:
+                 id: Boiler_Regulation
+                 above: 0
+                 below: 99
+              - binary_sensor.is_off: heat
+              - switch.is_on: Man
+              - lambda: 'return (id(Boiler_temperature).state < id(Boiler_Regulation_Temperature).state);' 
+          then: 
+              - number.to_max: Boiler_Regulation
+
+binary_sensor:
+
+  - platform: template
+    name: heat
+    id: heat
+    device_class: heat
+    lambda: |-
+      if (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state) {
+        return true;
+      } else {
+        return false;
+      }
+
+switch:
+  
+  - platform: template
+    name: "Man"
+    optimistic: true
+    id: Man
+    on_turn_off:
+      - number.to_min: Boiler_Regulation
+
+  - platform: gpio
+    id: Plus
+    name: Plus
+    pin: D3
+    on_turn_on:
+      if: 
+        condition:
+            - switch.is_off: Man
+            - lambda: 'return (id(Boiler_temperature).state <= id(Boiler_Regulation_Temperature).state);' 
+        then:   
+            - number.increment: 
+               id: Boiler_Regulation
+               cycle: false
+            - delay : 1s
+            - switch.turn_off: Plus
+        else:
+            - delay : 1s
+            - switch.turn_off: Plus
+ 
+  - platform: gpio
+    id: Moins
+    name: moins
+    pin: D4
+    on_turn_on:
+      if: 
+        condition:
+            - switch.is_off: Man
+            - lambda: 'return (id(Boiler_temperature).state <= id(Boiler_Regulation_Temperature).state);' 
+        then:   
+            - number.decrement:
+               id: Boiler_Regulation
+               cycle: false
+            - delay : 1s
+            - switch.turn_off: Moins
+        else:
+            - delay : 1s
+            - switch.turn_off: Moins
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal Boiler"
+    update_interval: 60s
+
+  - platform: dallas
+    address: 0xb93ce104572eb928
+    name: "Boiler temperature"
+    id: Boiler_temperature
+
+output:
+  - platform: x9c
+    id: x9c_pot
+    cs_pin: D8
+    inc_pin: D7
+    ud_pin: D6
+    initial_value: 0.01
+
+number:
+  - platform: template
+    name: "Boiler Regulation Temperature"
+    id: Boiler_Regulation_Temperature
+    optimistic: true
+    restore_value : true
+    min_value: 50
+    max_value: 60
+    step: 1
+
+  - platform: template
+    name: "Boiler Regulation"
+    id: Boiler_Regulation
+    optimistic: true
+    initial_value : 0
+    min_value: 0
+    max_value: 100
+    step: 5
+    on_value:
+     lambda: |-
+      auto out = id(x9c_pot);
+      out->set_level(x/100);
+
+i2c:
+  sda: D2
+  scl: D1
+
+font:
+  - file: "arial.ttf"
+    id: font1
+    size: 20
+
+  - file: "arial.ttf"
+    id: font2
+    size: 10
+
+display:
+  - platform: ssd1306_i2c
+    model: "SH1106 128x64"
+    address: 0x3C
+    lambda: |-
+      
+      it.printf(64, 0, id(font1), TextAlign::TOP_CENTER, "Boiler");
+      
+      if (id(Boiler_temperature).has_state()) {
+        it.printf(64, 40, id(font2), TextAlign::BASELINE_CENTER, "Temp :   %.0f° ", id(Boiler_temperature).state);
+      }
+
+      if (id(Boiler_Regulation_Temperature).has_state()) {
+        it.printf(64, 50, id(font2), TextAlign::BASELINE_CENTER, "Temp Consigne :   %.0f° ", id(Boiler_Regulation_Temperature).state);
+      }
+    
+      if (id(Boiler_Regulation).has_state()) {
+        it.printf(127, 60, id(font2), TextAlign::BASELINE_RIGHT, "Puissance :   %.0f ", id(Boiler_Regulation).state);
+      } 

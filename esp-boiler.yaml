@@ -41,6 +41,28 @@ captive_portal:
 dallas:
   - pin: D5
 
+climate:
+  - platform: thermostat
+    name: "Thermostat Boiler"
+    id: Thermostat_Boiler
+    sensor: Boiler_temperature
+    visual:
+      min_temperature: 55
+      max_temperature: 60
+      temperature_step: 0.1
+    min_heating_off_time: 3s
+    min_heating_run_time: 3s
+    min_idle_time: 3s
+    heat_action:
+      - lambda: 'return id(heat).publish_state(false);' 
+    idle_action:
+      - lambda: 'return id(heat).publish_state(true);'
+    default_preset: Home
+    preset:
+      - name: Home
+        mode: heat
+        default_target_temperature_low: 55 °C
+
 interval:
 
   - interval: 100ms
@@ -61,22 +83,7 @@ interval:
                  id: Boiler_Regulation
                  above: 1
                  below: 100
-              - lambda: 'return (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state);' 
-          then: 
-              - number.set:
-                 id: Boiler_Regulation
-                 value: 0
-
-
-  - interval: 100ms
-    then:
-      - if:
-          condition:
-              - number.in_range:
-                 id: Boiler_Regulation
-                 above: 1
-                 below: 100
-              - lambda: 'return (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state);' 
+              - binary_sensor.is_on: heat 
           then: 
               - number.set:
                  id: Boiler_Regulation
@@ -92,7 +99,6 @@ interval:
                  below: 99
               - binary_sensor.is_off: heat
               - switch.is_on: Man
-              - lambda: 'return (id(Boiler_temperature).state < id(Boiler_Regulation_Temperature).state);' 
           then: 
               - number.to_max: Boiler_Regulation
 
@@ -102,15 +108,20 @@ binary_sensor:
     name: heat
     id: heat
     device_class: heat
-    lambda: |-
-      if (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state) {
-        return true;
-      } else {
-        return false;
-      }
+#    lambda: |-
+#      if (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state) {
+#        return true;
+#      } else {
+#        return false;
+#      }
 
 switch:
   
+  - platform: template
+    name: "test"
+    optimistic: true
+    id: test
+
   - platform: template
     name: "Man"
     optimistic: true
@@ -126,7 +137,7 @@ switch:
       if: 
         condition:
             - switch.is_off: Man
-            - lambda: 'return (id(Boiler_temperature).state <= id(Boiler_Regulation_Temperature).state);' 
+            - binary_sensor.is_off: heat
         then:   
             - number.increment: 
                id: Boiler_Regulation
@@ -145,7 +156,7 @@ switch:
       if: 
         condition:
             - switch.is_off: Man
-            - lambda: 'return (id(Boiler_temperature).state <= id(Boiler_Regulation_Temperature).state);' 
+            - binary_sensor.is_off: heat
         then:   
             - number.decrement:
                id: Boiler_Regulation
@@ -222,10 +233,8 @@ display:
         it.printf(64, 40, id(font2), TextAlign::BASELINE_CENTER, "Temp :   %.0f° ", id(Boiler_temperature).state);
       }
 
-      if (id(Boiler_Regulation_Temperature).has_state()) {
-        it.printf(64, 50, id(font2), TextAlign::BASELINE_CENTER, "Temp Consigne :   %.0f° ", id(Boiler_Regulation_Temperature).state);
-      }
-    
+      it.printf(64, 50, id(font2), TextAlign::BASELINE_CENTER, "Temp Consigne :   %.0f° ", id(Thermostat_Boiler).target_temperature);
+      
       if (id(Boiler_Regulation).has_state()) {
         it.printf(127, 60, id(font2), TextAlign::BASELINE_RIGHT, "Puissance :   %.0f ", id(Boiler_Regulation).state);
       } 

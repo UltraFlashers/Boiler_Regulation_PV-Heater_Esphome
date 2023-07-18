@@ -5,7 +5,7 @@ esphome:
   board: d1_mini
   on_boot:
     then:
-      - switch.turn_off: Man
+      - switch.turn_off: Max
       - switch.turn_off: Plus
       - switch.turn_off: Moins
       - number.set:
@@ -98,7 +98,7 @@ interval:
                  above: 0
                  below: 99
               - binary_sensor.is_off: heat
-              - switch.is_on: Man
+              - switch.is_on: Max
           then: 
               - number.to_max: Boiler_Regulation
 
@@ -108,24 +108,13 @@ binary_sensor:
     name: heat
     id: heat
     device_class: heat
-#    lambda: |-
-#      if (id(Boiler_temperature).state >= id(Boiler_Regulation_Temperature).state) {
-#        return true;
-#      } else {
-#        return false;
-#      }
 
 switch:
   
   - platform: template
-    name: "test"
+    name: "Max"
     optimistic: true
-    id: test
-
-  - platform: template
-    name: "Man"
-    optimistic: true
-    id: Man
+    id: Max
     on_turn_off:
       - number.to_min: Boiler_Regulation
 
@@ -136,7 +125,7 @@ switch:
     on_turn_on:
       if: 
         condition:
-            - switch.is_off: Man
+            - switch.is_off: Max
             - binary_sensor.is_off: heat
         then:   
             - number.increment: 
@@ -155,7 +144,7 @@ switch:
     on_turn_on:
       if: 
         condition:
-            - switch.is_off: Man
+            - switch.is_off: Max
             - binary_sensor.is_off: heat
         then:   
             - number.decrement:
@@ -186,15 +175,7 @@ output:
     initial_value: 0.01
 
 number:
-  - platform: template
-    name: "Boiler Regulation Temperature"
-    id: Boiler_Regulation_Temperature
-    optimistic: true
-    restore_value : true
-    min_value: 50
-    max_value: 60
-    step: 1
-
+ 
   - platform: template
     name: "Boiler Regulation"
     id: Boiler_Regulation

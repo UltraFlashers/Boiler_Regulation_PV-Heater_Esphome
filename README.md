@@ -1,4 +1,5 @@
 # Boiler Regulation
+![Schéma](https://github.com/UltraFlashers/Boiler_Regulation_PV-Heater_Esphome/assets/139003033/60c7dd10-145d-43a1-98f5-26863c5be0dd)
 
 
 # HomeAssistant

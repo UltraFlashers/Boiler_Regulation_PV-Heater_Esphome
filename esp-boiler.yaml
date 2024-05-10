@@ -6,24 +6,33 @@ esphome:
   on_boot:
     then:
       - switch.turn_off: Max
-      - switch.turn_off: Plus
-      - switch.turn_off: Moins
+      - switch.turn_off: Relay
       - number.set:
          id: Boiler_Regulation
          value: 0
-    
-# Enable logging
+      - climate.control:
+          id: Thermostat_Boiler
+          target_temperature: 65°C
+
+##    
+#   Enable logging
+##
+
 logger:
 
-# Enable Home Assistant API
+##
+#   Enable Home Assistant API + Wifi
+##
+
 api:
   encryption:
-    key: "pJj8VTlmswTUW/1txvUfslGuXYZubYWXibghGv2b+/c="
+    key: "*********"
 
 ota:
   password: "fa5547981ce308a9baae99835ce6b51f"
 
 wifi:
+  id: wifi_id
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
@@ -32,14 +41,26 @@ wifi:
     ssid: "Esp-Boiler Fallback Hotspot"
     password: "opnrdfRndr6V"
 
-web_server:
-  port: 80
-  local: true
+#web_server:
+#  port: 80
+#  local: true
 
 captive_portal:
 
-dallas:
-  - pin: D5
+##
+#   Sun + Time
+##
+
+sun:
+  latitude: 50.474413°
+  longitude: 4.436827°
+
+time:
+  - platform: homeassistant
+
+##
+#   Thermostat
+##
 
 climate:
   - platform: thermostat
@@ -48,11 +69,15 @@ climate:
     sensor: Boiler_temperature
     visual:
       min_temperature: 55
-      max_temperature: 60
-      temperature_step: 0.1
-    min_heating_off_time: 3s
-    min_heating_run_time: 3s
-    min_idle_time: 3s
+      max_temperature: 68
+      temperature_step:
+        target_temperature: 0.5
+        current_temperature: 1
+    min_heating_off_time: 300s
+    min_heating_run_time: 30s
+    min_idle_time: 0s
+    heat_deadband: 1
+    heat_overrun: 1
     heat_action:
       - lambda: 'return id(heat).publish_state(false);' 
     idle_action:
@@ -61,19 +86,108 @@ climate:
     preset:
       - name: Home
         mode: heat
-        default_target_temperature_low: 55 °C
+        default_target_temperature_low: 65 °C
+
+##
+#   Interval
+##
 
 interval:
 
-  - interval: 100ms
+##
+#   Interval Essai si plus de 100 W d'injection plus et moins 500ms
+##
+
+  - interval: 1s
     then:
       - if:
           condition:
-              - lambda: 'return (isnan(id(Boiler_temperature).state));' 
-          then: 
-              - number.set:
-                 id: Boiler_Regulation
-                 value: 0
+            - lambda: 'return (id(produ_electricity).state >= 0.100);'
+            - binary_sensor.is_off: heat
+            - switch.is_off: Max  ## modif 21/1/2024 
+            - sun.is_above_horizon:
+            - number.in_range:
+               id: Boiler_Regulation
+               above: 0
+               below: 99
+          then:
+            - number.increment: 
+               id: Boiler_Regulation
+               cycle: false
+            - lambda: |-
+                 id(plus) = true;
+            - delay : 500ms
+            - lambda: |-
+                 id(plus) = false;
+         
+##
+#   Interval si plus de 1 W d'injection plus et moins 1sec
+##
+
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            - lambda: 'return (id(produ_electricity).state >= 0.001);'
+            - binary_sensor.is_off: heat
+            - switch.is_off: Max  ## modif 21/1/2024 
+            - sun.is_above_horizon:
+            - number.in_range:
+               id: Boiler_Regulation
+               above: 0
+               below: 99
+          then:
+            - number.increment: 
+               id: Boiler_Regulation
+               cycle: false
+            - lambda: |-
+                 id(plus) = true;
+            - delay : 1s
+            - lambda: |-
+                 id(plus) = false;
+         
+          else:
+            - if:
+                condition:
+                  - lambda: 'return (id(conso_electricity).state >= (id(Conso_select).state));'
+                  - binary_sensor.is_off: heat
+                  - switch.is_off: Max  ## modif 21/1/2024 
+                  - number.in_range:
+                     id: Boiler_Regulation
+                     above: 1
+                     below: 100
+                  - sun.is_above_horizon:
+                then:
+                  - number.decrement:
+                     id: Boiler_Regulation
+                     cycle: false
+                  - lambda: |-
+                     id(moins) = true;
+                  - delay : 1s
+                  - lambda: |-
+                     id(moins) = false;
+
+##
+#   Interval Activation Relay si regulateur entre 1 et 100
+##
+
+  - interval: 1s
+    then:
+      - if:
+          condition:
+             - binary_sensor.is_off: heat
+             - number.in_range:
+                id: Boiler_Regulation
+                above: 1
+                below: 100
+          then:
+              - switch.turn_on: Relay
+          else:
+              - switch.turn_off: Relay
+               
+##
+#   Interval securiter si il est chaud
+##
 
   - interval: 100ms
     then:
@@ -89,6 +203,10 @@ interval:
                  id: Boiler_Regulation
                  value: 0
 
+##
+#   Interval si MAX activer
+##
+
   - interval: 1s
     then:
       - if:
@@ -102,6 +220,26 @@ interval:
           then: 
               - number.to_max: Boiler_Regulation
 
+##
+#   Globals
+##
+
+globals:
+
+  - id: plus
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+  - id: moins
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+##
+#   Binary_sensor
+##
+
 binary_sensor:
 
   - platform: template
@@ -109,70 +247,79 @@ binary_sensor:
     id: heat
     device_class: heat
 
+
+##
+#   Switch
+##
+
 switch:
-  
+
+  - platform: gpio
+    id: Relay
+    name: Relay
+    pin: D3
+
   - platform: template
     name: "Max"
     optimistic: true
     id: Max
+    on_turn_on:                           ## modif 21/1/2024
+      - delay: !lambda 'return id(Activation_Boiler).state * 3600000;'                   ## modif 28/1/2024
+      - switch.turn_off: Max              ## modif 21/1/2024  
     on_turn_off:
-      - number.to_min: Boiler_Regulation
+      if:                                 ## modif 21/1/2024
+       condition:                         ## modif 21/1/2024
+        - number.in_range:                ## modif 21/1/2024
+           id: Boiler_Regulation          ## modif 21/1/2024
+           above: 1                       ## modif 21/1/2024
+           below: 100                     ## modif 21/1/2024
+       then:                              ## modif 21/1/2024
+        - number.to_min: Boiler_Regulation
 
-  - platform: gpio
-    id: Plus
-    name: Plus
-    pin: D3
-    on_turn_on:
-      if: 
-        condition:
-            - switch.is_off: Max
-            - binary_sensor.is_off: heat
-        then:   
-            - number.increment: 
-               id: Boiler_Regulation
-               cycle: false
-            - delay : 1s
-            - switch.turn_off: Plus
-        else:
-            - delay : 1s
-            - switch.turn_off: Plus
- 
-  - platform: gpio
-    id: Moins
-    name: moins
-    pin: D4
-    on_turn_on:
-      if: 
-        condition:
-            - switch.is_off: Max
-            - binary_sensor.is_off: heat
-        then:   
-            - number.decrement:
-               id: Boiler_Regulation
-               cycle: false
-            - delay : 1s
-            - switch.turn_off: Moins
-        else:
-            - delay : 1s
-            - switch.turn_off: Moins
+##
+#   Sensor + X9C + Dallas
+##
+
+dallas:
+  - pin: D5
 
 sensor:
+
   - platform: wifi_signal
     name: "WiFi Signal Boiler"
     update_interval: 60s
 
   - platform: dallas
-    address: 0xb93ce104572eb928
+    address: 0x7518e7431f64ff28
     name: "Boiler temperature"
     id: Boiler_temperature
+    filters:
+      - throttle: 1s
+      - heartbeat: 5s
+      - filter_out: nan
+
+  - platform: homeassistant
+    id: conso_electricity
+    entity_id: sensor.electricity_meter_power_consumption
+    internal: true
+
+  - platform: homeassistant
+    id: produ_electricity
+    entity_id: sensor.electricity_meter_power_production
+    internal: true
 
 output:
+
   - platform: x9c
     id: x9c_pot
     cs_pin: D8
     inc_pin: D7
     ud_pin: D6
     initial_value: 0.01
+
+##
+#   Number
+##
 
 number:
  
@@ -183,39 +330,151 @@ number:
     initial_value : 0
     min_value: 0
     max_value: 100
-    step: 5
+    step: 2
     on_value:
      lambda: |-
       auto out = id(x9c_pot);
       out->set_level(x/100);
 
-i2c:
-  sda: D2
-  scl: D1
+  - platform: template
+    name: "Conso select"
+    id: Conso_select
+    optimistic: true
+    initial_value : 0.150
+    min_value: 0.100
+    max_value: 0.300
+    step: 0.050
+
+  - platform: template
+    name: "Activation Boiler"
+    id: Activation_Boiler
+    optimistic: true
+    initial_value : 4
+    min_value: 2
+    max_value: 5
+    step: 1
+
+##
+#   Font
+##
 
 font:
+
+  - file: 'materialdesignicons-webfont.ttf'
+    id: icon12
+    size: 12
+    glyphs:
+      - "\U000F05A9" # mdi-wifiok
+      - "\U000F05AA" # mdi-wifino
+
+  - file: 'materialdesignicons-webfont.ttf'
+    id: icon20
+    size: 20
+    glyphs:
+      - "\U000F03f0" # mdi-percent
+      - "\U000F0393" # mdi-thermostat
+      - "\U000F1141" # mdi-min
+      - "\U000F0375" # mdi-minus
+      - "\U000F0416" # mdi-pl
+      - "\U000F0334" # mdi-plus
+      - "\U000F05A9" # mdi-wifiok
+      - "\U000F05AA" # mdi-wifino
+  
+  - file: 'materialdesignicons-webfont.ttf'
+    id: icon30
+    size: 30
+    glyphs:
+      - "\U000F0238" # mdi-fire
+      - "\U000F050F" # mdi-thermometer
+
   - file: "arial.ttf"
-    id: font1
+    id: font10
+    size: 10
+
+  - file: "arial.ttf"
+    id: font20
     size: 20
 
   - file: "arial.ttf"
-    id: font2
-    size: 10
+    id: font30
+    size: 30
+
+##
+#   Oled
+##
+
+i2c:
+
+  sda: D2
+  scl: D1
+  frequency: 800khz
 
 display:
+
   - platform: ssd1306_i2c
     model: "SH1106 128x64"
     address: 0x3C
+    update_interval: 500ms
     lambda: |-
+
+      // Print inside consomation (from homeassistant sensor)
+      if (id(conso_electricity).has_state()) {
+        it.printf(0, 33, id(font10), TextAlign::TOP_LEFT , "%.3fKW", id(conso_electricity).state);
+      }
       
-      it.printf(64, 0, id(font1), TextAlign::TOP_CENTER, "Boiler");
+      // Print inside production (from homeassistant sensor)
+      if (id(produ_electricity).has_state()) {
+        it.printf(128, 33, id(font10), TextAlign::TOP_RIGHT , "%.3fKW", id(produ_electricity).state);
+      }
       
-      if (id(Boiler_temperature).has_state()) {
-        it.printf(64, 40, id(font2), TextAlign::BASELINE_CENTER, "Temp :   %.0f° ", id(Boiler_temperature).state);
+      // Wifi
+       if (id(wifi_id).is_connected()) {
+        it.print(64, 33, id(icon12), TextAlign::TOP_CENTER, "\U000F05A9");
+      } else {
+        it.print(64, 33, id(icon12), TextAlign::TOP_CENTER, "\U000F05AA");
+      } 
+
+      /* Heat - Thermometer*/
+      if (id(heat).state) { 
+        it.print(24, 5, id(icon30), TextAlign::RIGHT, "\U000F0238");
+      } else {
+        it.print(24, 5, id(icon30), TextAlign::RIGHT, "\U000F050F");
       }
 
-      it.printf(64, 50, id(font2), TextAlign::BASELINE_CENTER, "Temp Consigne :   %.0f° ", id(Thermostat_Boiler).target_temperature);
+      /* Thermostat*/
+      it.print(75, 5, id(icon20), TextAlign::LEFT, "\U000F0393");  
       
+      /* Temp_consigne */
+      it.printf(135 , 4, id(font20), TextAlign::RIGHT, " %.0f° ", id(Thermostat_Boiler).target_temperature);
+    
+      /* Temp */
+      if (id(Boiler_temperature).has_state()) {
+        it.printf(14 , 4, id(font30), TextAlign::LEFT, " %.0f° ", id(Boiler_temperature).state);
+      } 
+
+      /* Plus */
+      if (id(plus)) {
+        it.print(4, 64, id(icon20), TextAlign::BASELINE_LEFT, "\U000F0416");
+      } else {
+        it.print(4, 64, id(icon20), TextAlign::BASELINE_LEFT, "\U000F0334");
+      }
+
+      /* Minus */
+      if (id(moins)) {
+        it.print(124, 64, id(icon20), TextAlign::BASELINE_RIGHT, "\U000F0375");
+      } else {
+        it.print(124, 64, id(icon20), TextAlign::BASELINE_RIGHT, "\U000F1141");
+      }
+      
+      // Max
+      if (id(Max).state) {
+        it.printf(128, 23, id(font10), TextAlign::TOP_RIGHT, "Max");
+      }
+
+      /* Percent */
+      it.print(73, 64, id(icon20), TextAlign::BASELINE_LEFT, "\U000F03f0" );   
+
+      /* 0 - 100 */
       if (id(Boiler_Regulation).has_state()) {
-        it.printf(127, 60, id(font2), TextAlign::BASELINE_RIGHT, "Puissance :   %.0f ", id(Boiler_Regulation).state);
+        it.printf(77, 64, id(font20), TextAlign::BASELINE_RIGHT, " %.0f ", id(Boiler_Regulation).state);
       } 

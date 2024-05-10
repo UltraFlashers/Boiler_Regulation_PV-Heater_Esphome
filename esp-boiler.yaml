@@ -29,7 +29,7 @@ api:
     key: "*********"
 
 ota:
-  password: "fa5547981ce308a9baae99835ce6b51f"
+  password: "*********"
 
 wifi:
   id: wifi_id
